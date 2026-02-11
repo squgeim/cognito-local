@@ -86,6 +86,8 @@ interface PreSignUpEvent extends EventCommonParameters {
   validationData: Record<string, string> | undefined;
 }
 
+export type PreTokenGenerationLambdaVersion = "V1_0" | "V2_0";
+
 interface PreTokenGenerationEvent extends EventCommonParameters {
   /**
    * One or more key-value pairs that you can provide as custom input to the Lambda function that you specify for the
@@ -121,6 +123,16 @@ interface PreTokenGenerationEvent extends EventCommonParameters {
      */
     preferredRole: string | undefined;
   };
+
+  /**
+   * The version of the lambda trigger to use. V2_0 enables access token customization.
+   */
+  lambdaVersion: PreTokenGenerationLambdaVersion;
+
+  /**
+   * The scopes for the access token (only used with V2_0).
+   */
+  scopes: readonly string[] | undefined;
 }
 
 interface PostAuthenticationEvent extends EventCommonParameters {
@@ -152,8 +164,37 @@ export type CustomMessageTriggerResponse =
 export type UserMigrationTriggerResponse =
   UserMigrationTriggerEvent["response"];
 export type PreSignUpTriggerResponse = PreSignUpTriggerEvent["response"];
-export type PreTokenGenerationTriggerResponse =
+
+// V1 response type from aws-lambda types
+export type PreTokenGenerationV1TriggerResponse =
   PreTokenGenerationTriggerEvent["response"];
+
+// V2 response type with access token customization support
+export interface PreTokenGenerationV2TriggerResponse {
+  claimsAndScopeOverrideDetails?: {
+    idTokenGeneration?: {
+      claimsToAddOrOverride?: Record<string, string>;
+      claimsToSuppress?: string[];
+    };
+    accessTokenGeneration?: {
+      claimsToAddOrOverride?: Record<string, string>;
+      claimsToSuppress?: string[];
+      scopesToAdd?: string[];
+      scopesToSuppress?: string[];
+    };
+    groupOverrideDetails?: {
+      groupsToOverride?: string[];
+      iamRolesToOverride?: string[];
+      preferredRole?: string;
+    };
+  };
+}
+
+// Union type for trigger response
+export type PreTokenGenerationTriggerResponse =
+  | PreTokenGenerationV1TriggerResponse
+  | PreTokenGenerationV2TriggerResponse;
+
 export type PostAuthenticationTriggerResponse =
   PostAuthenticationTriggerEvent["response"];
 export type PostConfirmationTriggerResponse =
@@ -364,8 +405,9 @@ export class LambdaService implements Lambda {
       case "TokenGeneration_HostedAuth":
       case "TokenGeneration_NewPasswordChallenge":
       case "TokenGeneration_RefreshTokens": {
+        const isV2 = event.lambdaVersion === "V2_0";
         return {
-          version,
+          version: isV2 ? "2" : version,
           callerContext,
           region,
           userPoolId: event.userPoolId,
@@ -375,11 +417,12 @@ export class LambdaService implements Lambda {
             userAttributes: event.userAttributes,
             groupConfiguration: {},
             clientMetadata: event.clientMetadata,
+            ...(isV2 && { scopes: event.scopes ?? [] }),
           },
-          response: {
-            claimsOverrideDetails: {},
-          },
-        };
+          response: isV2
+            ? { claimsAndScopeOverrideDetails: {} }
+            : { claimsOverrideDetails: {} },
+        } as PreTokenGenerationTriggerEvent;
       }
 
       case "UserMigration_Authentication": {
