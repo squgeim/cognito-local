@@ -152,11 +152,19 @@ export type CustomMessageTriggerResponse =
 export type UserMigrationTriggerResponse =
   UserMigrationTriggerEvent["response"];
 export type PreSignUpTriggerResponse = PreSignUpTriggerEvent["response"];
-// V1 Pre Token Generation Response
+
+/**
+ * Pre Token Generation Lambda Trigger Response Types
+ *
+ * V1 response type comes from aws-lambda package (PreTokenGenerationTriggerEvent["response"])
+ * V2 response type is defined here as it's not yet available in aws-lambda package types.
+ *
+ * V2 adds support for customizing access tokens in addition to ID tokens.
+ * Lambda functions can return either format, and cognito-local will detect and handle both.
+ */
 export type PreTokenGenerationV1Response =
   PreTokenGenerationTriggerEvent["response"];
 
-// V2 Pre Token Generation Response
 export interface PreTokenGenerationV2Response {
   claimsAndScopeOverrideDetails?: {
     idTokenClaimsToAddOrOverride?: Record<string, unknown>;
@@ -175,7 +183,6 @@ export interface PreTokenGenerationV2Response {
   };
 }
 
-// Combined type that supports both v1 and v2 responses
 export type PreTokenGenerationTriggerResponse =
   | PreTokenGenerationV1Response
   | PreTokenGenerationV2Response;
