@@ -8,6 +8,10 @@ import PrivateKey from "../keys/cognitoLocal.private.json";
 import type { AppClient } from "./appClient";
 import type { Clock } from "./clock";
 import type { Context } from "./context";
+import type {
+  PreTokenGenerationV1Response,
+  PreTokenGenerationV2Response,
+} from "./lambda";
 import type { Triggers } from "./triggers";
 import {
   attributesToRecord,
@@ -84,6 +88,46 @@ const applyTokenOverrides = (
   );
 };
 
+const applyV2TokenOverrides = (
+  idToken: RawToken,
+  accessToken: RawToken,
+  response: PreTokenGenerationV2Response,
+): { idToken: RawToken; accessToken: RawToken } => {
+  const claimsAndScope = response.claimsAndScopeOverrideDetails || {};
+
+  // Apply ID token overrides
+  const idTokenClaimsToSuppress = (
+    claimsAndScope.idTokenClaimsToSuppress ?? []
+  ).filter((claim: string) => !RESERVED_CLAIMS.includes(claim));
+
+  const idTokenClaimsToOverride = Object.entries(
+    claimsAndScope.idTokenClaimsToAddOrOverride ?? {},
+  ).filter(([claim]) => !RESERVED_CLAIMS.includes(claim));
+
+  const updatedIdToken = Object.fromEntries(
+    [...Object.entries(idToken), ...idTokenClaimsToOverride].filter(
+      ([claim]) => !idTokenClaimsToSuppress.includes(claim),
+    ),
+  ) as RawToken;
+
+  // Apply access token overrides
+  const accessTokenClaimsToSuppress = (
+    claimsAndScope.accessTokenClaimsToSuppress ?? []
+  ).filter((claim: string) => !RESERVED_CLAIMS.includes(claim));
+
+  const accessTokenClaimsToOverride = Object.entries(
+    claimsAndScope.accessTokenClaimsToAddOrOverride ?? {},
+  ).filter(([claim]) => !RESERVED_CLAIMS.includes(claim));
+
+  const updatedAccessToken = Object.fromEntries(
+    [...Object.entries(accessToken), ...accessTokenClaimsToOverride].filter(
+      ([claim]) => !accessTokenClaimsToSuppress.includes(claim),
+    ),
+  ) as RawToken;
+
+  return { idToken: updatedIdToken, accessToken: updatedAccessToken };
+};
+
 export interface Tokens {
   readonly AccessToken: string;
   readonly IdToken: string;
@@ -158,7 +202,7 @@ export class JwtTokenGenerator implements TokenGenerator {
     const authTime = Math.floor(this.clock.get().getTime() / 1000);
     const sub = attributeValue("sub", user.Attributes);
 
-    const accessToken: RawToken = {
+    let accessToken: RawToken = {
       auth_time: authTime,
       client_id: userPoolClient.ClientId,
       event_id: eventId,
@@ -205,7 +249,23 @@ export class JwtTokenGenerator implements TokenGenerator {
         userPoolId: userPoolClient.UserPoolId,
       });
 
-      idToken = applyTokenOverrides(idToken, result.claimsOverrideDetails);
+      // Check if this is a v2 response (has claimsAndScopeOverrideDetails)
+      if ("claimsAndScopeOverrideDetails" in result) {
+        // V2 response - apply to both ID and access tokens
+        const updated = applyV2TokenOverrides(
+          idToken,
+          accessToken,
+          result as PreTokenGenerationV2Response,
+        );
+        idToken = updated.idToken;
+        accessToken = updated.accessToken;
+      } else {
+        // V1 response - only apply to ID token
+        idToken = applyTokenOverrides(
+          idToken,
+          (result as PreTokenGenerationV1Response).claimsOverrideDetails,
+        );
+      }
     }
 
     const issuer = `${this.tokenConfig.IssuerDomain}/${userPoolClient.UserPoolId}`;
