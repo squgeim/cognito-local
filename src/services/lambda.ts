@@ -154,6 +154,25 @@ export type UserMigrationTriggerResponse =
 export type PreSignUpTriggerResponse = PreSignUpTriggerEvent["response"];
 export type PreTokenGenerationTriggerResponse =
   PreTokenGenerationTriggerEvent["response"];
+
+// V2 Pre Token Generation types
+export interface PreTokenGenerationV2Response {
+  claimsAndScopeOverrideDetails?: {
+    idTokenClaimsToAddOrOverride?: Record<string, any>;
+    idTokenClaimsToSuppress?: string[];
+    accessTokenClaimsToAddOrOverride?: Record<string, any>;
+    accessTokenClaimsToSuppress?: string[];
+    scopeOverrideDetails?: {
+      scopesToAdd?: string[];
+      scopesToSuppress?: string[];
+    };
+  };
+  groupOverrideDetails?: {
+    groupsToOverride?: string[];
+    iamRolesToOverride?: string[];
+    preferredRole?: string;
+  };
+}
 export type PostAuthenticationTriggerResponse =
   PostAuthenticationTriggerEvent["response"];
 export type PostConfirmationTriggerResponse =
