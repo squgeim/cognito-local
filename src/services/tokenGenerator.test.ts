@@ -29,7 +29,7 @@ describe("JwtTokenGenerator", () => {
     });
   });
 
-  describe("TokenGeneration lambda is configured", () => {
+  describe("TokenGeneration lambda is configured (V1)", () => {
     it("can add and override claims to the id token", async () => {
       mockTriggers.enabled.mockImplementation((name) => {
         return name === "PreTokenGeneration";
@@ -66,6 +66,39 @@ describe("JwtTokenGenerator", () => {
       expect(jwt.decode(tokens.RefreshToken)).not.toMatchObject({
         newclaim: "value",
         email: "something else",
+      });
+    });
+
+    it("V1 behavior unchanged when explicitly using V1_0", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsOverrideDetails: {
+          claimsToAddOrOverride: {
+            newclaim: "value",
+          },
+        },
+      });
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        TDB.appClient(),
+        { client: "metadata" },
+        "RefreshTokens",
+        "V1_0",
+      );
+
+      // id token has new claim added
+      expect(jwt.decode(tokens.IdToken)).toMatchObject({
+        newclaim: "value",
+      });
+
+      // access token should not have the new claim
+      expect(jwt.decode(tokens.AccessToken)).not.toMatchObject({
+        newclaim: "value",
       });
     });
 
@@ -175,6 +208,236 @@ describe("JwtTokenGenerator", () => {
         expect(jwt.decode(tokens.IdToken)).not.toMatchObject({
           [claim]: "value",
         });
+      });
+    });
+  });
+
+  describe("TokenGeneration lambda is configured (V2)", () => {
+    it("can add claims to access token via V2 response", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsAndScopeOverrideDetails: {
+          accessTokenGeneration: {
+            claimsToAddOrOverride: {
+              "custom:role": "admin",
+            },
+          },
+        },
+      });
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        TDB.appClient(),
+        { client: "metadata" },
+        "RefreshTokens",
+        "V2_0",
+      );
+
+      // access token has new claim added
+      expect(jwt.decode(tokens.AccessToken)).toMatchObject({
+        "custom:role": "admin",
+      });
+
+      // id token should not have the access token claim
+      expect(jwt.decode(tokens.IdToken)).not.toMatchObject({
+        "custom:role": "admin",
+      });
+    });
+
+    it("can add claims to id token via V2 response", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsAndScopeOverrideDetails: {
+          idTokenGeneration: {
+            claimsToAddOrOverride: {
+              "custom:org": "acme",
+            },
+          },
+        },
+      });
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        TDB.appClient(),
+        { client: "metadata" },
+        "RefreshTokens",
+        "V2_0",
+      );
+
+      // id token has new claim added
+      expect(jwt.decode(tokens.IdToken)).toMatchObject({
+        "custom:org": "acme",
+      });
+
+      // access token should not have the id token claim
+      expect(jwt.decode(tokens.AccessToken)).not.toMatchObject({
+        "custom:org": "acme",
+      });
+    });
+
+    it("can add claims to both id and access tokens via V2 response", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsAndScopeOverrideDetails: {
+          idTokenGeneration: {
+            claimsToAddOrOverride: {
+              "custom:org": "acme",
+            },
+          },
+          accessTokenGeneration: {
+            claimsToAddOrOverride: {
+              "custom:role": "admin",
+            },
+          },
+        },
+      });
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        TDB.appClient(),
+        { client: "metadata" },
+        "RefreshTokens",
+        "V2_0",
+      );
+
+      // id token has its claim
+      expect(jwt.decode(tokens.IdToken)).toMatchObject({
+        "custom:org": "acme",
+      });
+      expect(jwt.decode(tokens.IdToken)).not.toMatchObject({
+        "custom:role": "admin",
+      });
+
+      // access token has its claim
+      expect(jwt.decode(tokens.AccessToken)).toMatchObject({
+        "custom:role": "admin",
+      });
+      expect(jwt.decode(tokens.AccessToken)).not.toMatchObject({
+        "custom:org": "acme",
+      });
+    });
+
+    it("can suppress claims in access token via V2 response", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsAndScopeOverrideDetails: {
+          accessTokenGeneration: {
+            claimsToAddOrOverride: {
+              "custom:role": "admin",
+            },
+            claimsToSuppress: ["custom:role"],
+          },
+        },
+      });
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        TDB.appClient(),
+        { client: "metadata" },
+        "RefreshTokens",
+        "V2_0",
+      );
+
+      // claim should be suppressed even though it was also added
+      expect(jwt.decode(tokens.AccessToken)).not.toHaveProperty("custom:role");
+    });
+
+    describe.each([
+      "acr",
+      "amr",
+      "aud",
+      "at_hash",
+      "auth_time",
+      "azp",
+      "cognito:username",
+      "exp",
+      "iat",
+      "identities",
+      "iss",
+      "jti",
+      "nbf",
+      "nonce",
+      "origin_jti",
+      "sub",
+      "token_use",
+      "client_id",
+      "scope",
+      "username",
+    ])("reserved access token claim %s", (claim) => {
+      it("cannot override a reserved claim in access token", async () => {
+        mockTriggers.enabled.mockImplementation((name) => {
+          return name === "PreTokenGeneration";
+        });
+        mockTriggers.preTokenGeneration.mockResolvedValue({
+          claimsAndScopeOverrideDetails: {
+            accessTokenGeneration: {
+              claimsToAddOrOverride: {
+                [claim]: "malicious_value",
+              },
+            },
+          },
+        });
+
+        const tokens = await tokenGenerator.generate(
+          TestContext,
+          user,
+          [],
+          TDB.appClient(),
+          { client: "metadata" },
+          "RefreshTokens",
+          "V2_0",
+        );
+
+        expect(jwt.decode(tokens.AccessToken)).not.toMatchObject({
+          [claim]: "malicious_value",
+        });
+      });
+    });
+
+    it("handles empty V2 response gracefully", async () => {
+      mockTriggers.enabled.mockImplementation((name) => {
+        return name === "PreTokenGeneration";
+      });
+      mockTriggers.preTokenGeneration.mockResolvedValue({
+        claimsAndScopeOverrideDetails: {},
+      });
+
+      const userPoolClient = TDB.appClient();
+
+      const tokens = await tokenGenerator.generate(
+        TestContext,
+        user,
+        [],
+        userPoolClient,
+        { client: "metadata" },
+        "RefreshTokens",
+        "V2_0",
+      );
+
+      // tokens should be generated normally without modifications
+      expect(jwt.decode(tokens.AccessToken)).toMatchObject({
+        client_id: userPoolClient.ClientId,
+        token_use: "access",
+      });
+      expect(jwt.decode(tokens.IdToken)).toMatchObject({
+        "cognito:username": user.Username,
+        token_use: "id",
       });
     });
   });

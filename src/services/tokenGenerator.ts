@@ -8,6 +8,11 @@ import PrivateKey from "../keys/cognitoLocal.private.json";
 import type { AppClient } from "./appClient";
 import type { Clock } from "./clock";
 import type { Context } from "./context";
+import type {
+  PreTokenGenerationLambdaVersion,
+  PreTokenGenerationTriggerResponse,
+  PreTokenGenerationV2TriggerResponse,
+} from "./lambda";
 import type { Triggers } from "./triggers";
 import {
   attributesToRecord,
@@ -58,6 +63,14 @@ const RESERVED_CLAIMS = [
   "token_use",
 ];
 
+// Additional reserved claims for access tokens
+const ACCESS_TOKEN_RESERVED_CLAIMS = [
+  ...RESERVED_CLAIMS,
+  "client_id",
+  "scope",
+  "username",
+];
+
 type RawToken = Record<
   string,
   string | number | boolean | undefined | readonly string[]
@@ -66,22 +79,30 @@ type RawToken = Record<
 const applyTokenOverrides = (
   token: RawToken,
   overrides: TokenOverrides,
+  reservedClaims: readonly string[] = RESERVED_CLAIMS,
 ): RawToken => {
   // TODO: support group overrides
 
   const claimsToSuppress = (overrides?.claimsToSuppress ?? []).filter(
-    (claim) => !RESERVED_CLAIMS.includes(claim),
+    (claim) => !reservedClaims.includes(claim),
   );
 
   const claimsToOverride = Object.entries(
     overrides?.claimsToAddOrOverride ?? [],
-  ).filter(([claim]) => !RESERVED_CLAIMS.includes(claim));
+  ).filter(([claim]) => !reservedClaims.includes(claim));
 
   return Object.fromEntries(
     [...Object.entries(token), ...claimsToOverride].filter(
       ([claim]) => !claimsToSuppress.includes(claim),
     ),
   );
+};
+
+// Type guard to check if the response is a V2 response
+const isV2Response = (
+  response: PreTokenGenerationTriggerResponse,
+): response is PreTokenGenerationV2TriggerResponse => {
+  return "claimsAndScopeOverrideDetails" in response;
 };
 
 export interface Tokens {
@@ -103,6 +124,7 @@ export interface TokenGenerator {
       | "HostedAuth"
       | "NewPasswordChallenge"
       | "RefreshTokens",
+    lambdaVersion?: PreTokenGenerationLambdaVersion,
   ): Promise<Tokens>;
 }
 
@@ -153,18 +175,20 @@ export class JwtTokenGenerator implements TokenGenerator {
       | "HostedAuth"
       | "NewPasswordChallenge"
       | "RefreshTokens",
+    lambdaVersion: PreTokenGenerationLambdaVersion = "V1_0",
   ): Promise<Tokens> {
     const eventId = uuid.v4();
     const authTime = Math.floor(this.clock.get().getTime() / 1000);
     const sub = attributeValue("sub", user.Attributes);
+    const currentScopes = ["aws.cognito.signin.user.admin"]; // TODO: scopes
 
-    const accessToken: RawToken = {
+    let accessToken: RawToken = {
       auth_time: authTime,
       client_id: userPoolClient.ClientId,
       event_id: eventId,
       iat: authTime,
       jti: uuid.v4(),
-      scope: "aws.cognito.signin.user.admin", // TODO: scopes
+      scope: currentScopes.join(" "),
       sub,
       token_use: "access",
       username: user.Username,
@@ -203,9 +227,34 @@ export class JwtTokenGenerator implements TokenGenerator {
           preferredRole: undefined,
         },
         userPoolId: userPoolClient.UserPoolId,
+        lambdaVersion,
+        scopes: currentScopes,
       });
 
-      idToken = applyTokenOverrides(idToken, result.claimsOverrideDetails);
+      if (isV2Response(result)) {
+        // V2 response: apply overrides to both ID and access tokens
+        if (result.claimsAndScopeOverrideDetails?.idTokenGeneration) {
+          idToken = applyTokenOverrides(
+            idToken,
+            result.claimsAndScopeOverrideDetails.idTokenGeneration,
+            RESERVED_CLAIMS,
+          );
+        }
+        if (result.claimsAndScopeOverrideDetails?.accessTokenGeneration) {
+          accessToken = applyTokenOverrides(
+            accessToken,
+            result.claimsAndScopeOverrideDetails.accessTokenGeneration,
+            ACCESS_TOKEN_RESERVED_CLAIMS,
+          );
+        }
+      } else {
+        // V1 response: only apply overrides to ID token
+        idToken = applyTokenOverrides(
+          idToken,
+          result.claimsOverrideDetails,
+          RESERVED_CLAIMS,
+        );
+      }
     }
 
     const issuer = `${this.tokenConfig.IssuerDomain}/${userPoolClient.UserPoolId}`;

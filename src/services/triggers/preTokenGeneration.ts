@@ -1,5 +1,9 @@
 import type { AttributeListType } from "aws-sdk/clients/cognitoidentityserviceprovider";
-import type { Lambda, PreTokenGenerationTriggerResponse } from "../lambda";
+import type {
+  Lambda,
+  PreTokenGenerationLambdaVersion,
+  PreTokenGenerationTriggerResponse,
+} from "../lambda";
 import { attributesToRecord } from "../userPoolService";
 import type { Trigger } from "./trigger";
 
@@ -48,6 +52,16 @@ export type PreTokenGenerationTrigger = Trigger<
        */
       preferredRole: string | undefined;
     };
+
+    /**
+     * The version of the lambda trigger to use. V2_0 enables access token customization.
+     */
+    lambdaVersion: PreTokenGenerationLambdaVersion;
+
+    /**
+     * The scopes for the access token (only used with V2_0).
+     */
+    scopes: readonly string[] | undefined;
   },
   PreTokenGenerationTriggerResponse
 >;
@@ -64,6 +78,8 @@ export const PreTokenGeneration =
       clientId,
       clientMetadata,
       groupConfiguration,
+      lambdaVersion,
+      scopes,
       source,
       userAttributes,
       username,
@@ -74,6 +90,8 @@ export const PreTokenGeneration =
       clientId,
       clientMetadata,
       groupConfiguration,
+      lambdaVersion,
+      scopes,
       triggerSource: `TokenGeneration_${source}`,
       userAttributes: attributesToRecord(userAttributes),
       username,
