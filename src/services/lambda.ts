@@ -152,15 +152,16 @@ export type CustomMessageTriggerResponse =
 export type UserMigrationTriggerResponse =
   UserMigrationTriggerEvent["response"];
 export type PreSignUpTriggerResponse = PreSignUpTriggerEvent["response"];
-export type PreTokenGenerationTriggerResponse =
+// V1 Pre Token Generation Response
+export type PreTokenGenerationV1Response =
   PreTokenGenerationTriggerEvent["response"];
 
-// V2 Pre Token Generation types
+// V2 Pre Token Generation Response
 export interface PreTokenGenerationV2Response {
   claimsAndScopeOverrideDetails?: {
-    idTokenClaimsToAddOrOverride?: Record<string, any>;
+    idTokenClaimsToAddOrOverride?: Record<string, unknown>;
     idTokenClaimsToSuppress?: string[];
-    accessTokenClaimsToAddOrOverride?: Record<string, any>;
+    accessTokenClaimsToAddOrOverride?: Record<string, unknown>;
     accessTokenClaimsToSuppress?: string[];
     scopeOverrideDetails?: {
       scopesToAdd?: string[];
@@ -173,6 +174,11 @@ export interface PreTokenGenerationV2Response {
     preferredRole?: string;
   };
 }
+
+// Combined type that supports both v1 and v2 responses
+export type PreTokenGenerationTriggerResponse =
+  | PreTokenGenerationV1Response
+  | PreTokenGenerationV2Response;
 export type PostAuthenticationTriggerResponse =
   PostAuthenticationTriggerEvent["response"];
 export type PostConfirmationTriggerResponse =
